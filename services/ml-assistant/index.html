@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GovSync Voice & Chat Assistant</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0b1329;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #1e293b;
+      padding: 28px;
+      border-radius: 16px;
+      width: 460px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      text-align: center;
+      border: 1px solid #334155;
+    }
+    h3 { margin-top: 0; color: #38bdf8; }
+    .subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
+    button.mic-btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 12px 28px;
+      border-radius: 50px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button.mic-btn.listening {
+      background: #dc2626;
+      animation: pulse 1s infinite;
+    }
+    .chat-input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .chat-input-row input {
+      flex: 1;
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+    }
+    .chat-input-row button {
+      background: #38bdf8;
+      border: none;
+      border-radius: 8px;
+      padding: 0 18px;
+      font-weight: bold;
+      cursor: pointer;
+      color: #0f172a;
+    }
+    .box {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 12px;
+      text-align: left;
+      font-size: 14px;
+      border: 1px solid #1e293b;
+      min-height: 20px;
+    }
+    .box b { color: #38bdf8; }
+    
+    /* Package Consent Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: #1e293b;
+      border: 1px solid #38bdf8;
+      border-radius: 12px;
+      padding: 24px;
+      width: 400px;
+      text-align: left;
+    }
+    .consent-item {
+      background: #0f172a;
+      padding: 10px 12px;
+      border-radius: 6px;
+      margin: 8px 0;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .otp-input {
+      width: 100%;
+      padding: 10px;
+      margin-top: 12px;
+      border-radius: 6px;
+      background: #0f172a;
+      color: #fff;
+      border: 1px solid #334155;
+      outline: none;
+    }
+    .btn-approve {
+      background: #10b981;
+      color: #fff;
+      border: none;
+      width: 100%;
+      padding: 12px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 14px;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h3>GovSync Citizen Assistant</h3>
+    <div class="subtitle">Voice & Chat Interface </div>
+
+    <button id="micBtn" class="mic-btn" onclick="toggleSpeech()">🎤 Click to Speak</button>
+    
+    <div class="chat-input-row">
+      <input type="text" id="typeInput" placeholder="Type here (e.g. stipend apply pannu)..." onkeypress="handleKey(event)"/>
+      <button onclick="sendText()">Send</button>
+    </div>
+
+    <div class="box"><b>Citizen:</b> <span id="userText">-</span></div>
+    <div class="box"><b>Sahayak:</b> <span id="botReply">-</span></div>
+  </div>
+
+  <!-- One-Time Package Consent Modal -->
+  <div id="consentModal" class="modal-overlay">
+    <div class="modal-content">
+      <h4 style="margin:0 0 10px 0; color:#38bdf8;">📋 One-Time Package Consent Request</h4>
+      <p style="font-size:12px; color:#cbd5e1; margin:0 0 12px 0;">
+        GovSync requires citizen consent to pre-fetch verified certificates for: 
+        <b id="schemeLabel" style="color:#f59e0b;">Requested Scheme</b>
+      </p>
+      
+      <div class="consent-item"><input type="checkbox" checked disabled> Revenue Dept: Income & Caste Certificate</div>
+      <div class="consent-item"><input type="checkbox" checked disabled> Education Board: Marksheet Records</div>
+      <div class="consent-item"><input type="checkbox" checked disabled> UIDAI: Aadhaar eKYC Verification</div>
+
+      <input type="text" class="otp-input" placeholder="Enter Aadhaar OTP (e.g. 748921)">
+      <button class="btn-approve" onclick="approveConsent()">✔ Allow & Auto-Fill Form</button>
+    </div>
+  </div>
+
+  <script>
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition;
+    let isListening = false;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      // Indian English transcribe mode: handles Indian English and captures Tanglish in Latin letters
+      recognition.lang = 'en-IN'; 
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        isListening = true;
+        document.getElementById('micBtn').classList.add('listening');
+        document.getElementById('micBtn').innerText = '🔴 Listening...';
+      };
+
+      recognition.onresult = async (event) => {
+        const transcript = event.results[0][0].transcript;
+        document.getElementById('userText').innerText = transcript;
+        await queryBackend(transcript, true);
+      };
+
+      recognition.onend = () => {
+        isListening = false;
+        document.getElementById('micBtn').classList.remove('listening');
+        document.getElementById('micBtn').innerText = '🎤 Click to Speak';
+      };
+    }
+
+    function toggleSpeech() {
+      if (!recognition) return alert("Please open in Chrome or Edge.");
+      if (isListening) recognition.stop();
+      else recognition.start();
+    }
+
+    function handleKey(e) {
+      if (e.key === 'Enter') sendText();
+    }
+
+    function sendText() {
+      const input = document.getElementById('typeInput');
+      const val = input.value.trim();
+      if (!val) return;
+      document.getElementById('userText').innerText = val;
+      queryBackend(val, false);
+      input.value = '';
+    }
+
+    // Tamil text irukka nu check panna function
+    function hasTamilCharacters(text) {
+      return /[\u0B80-\u0BFF]/.test(text);
+    }
+
+    async function queryBackend(text, shouldSpeakAudio) {
+      try {
+        const response = await fetch("http://localhost:8001/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text })
+        });
+        const data = await response.json();
+        
+        document.getElementById('botReply').innerText = data.reply;
+
+        if (shouldSpeakAudio) {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(data.reply);
+
+          // System-la irukura voices load panrom
+          const voices = window.speechSynthesis.getVoices();
+          const isTamil = hasTamilCharacters(data.reply);
+
+          if (isTamil) {
+            // Tamil voice thedurom; illana fallback to any Indian English voice
+            const taVoice = voices.find(v => v.lang === 'ta-IN' || v.lang.startsWith('ta'));
+            if (taVoice) {
+              utterance.voice = taVoice;
+              utterance.lang = 'ta-IN';
+            } else {
+              // Windows-la Tamil voice illana silent aagaama irukka Indian voice fallback
+              const fallbackVoice = voices.find(v => v.lang.includes('IN') || v.name.includes('India'));
+              if (fallbackVoice) utterance.voice = fallbackVoice;
+              utterance.lang = 'en-IN';
+            }
+          } else {
+            // English or Tanglish-kku Indian English voice
+            const enVoice = voices.find(v => v.lang === 'en-IN');
+            if (enVoice) utterance.voice = enVoice;
+            utterance.lang = 'en-IN';
+          }
+
+          utterance.rate = 0.95; // Clear pronunciation-kku slight slow speed
+          window.speechSynthesis.speak(utterance);
+        }
+
+        if (data.action === "OPEN_CONSENT_POPUP") {
+          document.getElementById('schemeLabel').innerText = data.scheme_id || "Selected Scheme";
+          document.getElementById('consentModal').style.display = 'flex';
+        }
+      } catch (err) {
+        document.getElementById('botReply').innerText = "Backend connection error. Please try again.";
+      }
+    }
+
+    // Browser voices ready aaguradhai ensure panna
+    window.speechSynthesis.onvoiceschanged = () => {
+      window.speechSynthesis.getVoices();
+    };
+
+    function approveConsent() {
+      alert("✅ Consent verified! Auto-filling application form.");
+      document.getElementById('consentModal').style.display = 'none';
+    }
+  </script>
+</body>
+</html>
